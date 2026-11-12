@@ -2,10 +2,18 @@
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { build, type Plugin } from 'esbuild'
-import { convertV4MiniflareOptions, Miniflare } from 'miniflare'
+import * as miniflare from 'miniflare'
+import { Miniflare } from 'miniflare'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
+
+// Miniflare 5 (pinned by wrangler 4.160+) takes a new options shape and ships a converter for the v4 shape;
+// Miniflare 4 (npm's `latest`, what CI installs) takes the v4 shape directly.
+function miniflareOptions(options: Record<string, unknown>): any {
+  const convert = (miniflare as any).convertV4MiniflareOptions
+  return typeof convert === 'function' ? convert(options) : options
+}
 const distEntry = `${root}dist/index.js`
 
 function newest(dir: string): number {
@@ -53,7 +61,7 @@ describe.each(targets)('Worker bundle from %s on workerd', (target) => {
   beforeAll(async () => {
     const script = await bundle(target)
     mf = new Miniflare(
-      convertV4MiniflareOptions({
+      miniflareOptions({
         modules: true,
         script,
         compatibilityDate: '2025-06-01',
