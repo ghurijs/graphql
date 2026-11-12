@@ -1,6 +1,6 @@
 {
   "name": "@ghuri/graphql",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0-alpha.1",
   "description": "Ghuri GraphQL: graphene-django style schemas from your models, with REST serializers, permissions and auth reused",
   "type": "module",
   "license": "MIT",
@@ -63,17 +63,18 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.6",
+    "@ghuri/auth": "^0.1.0-alpha.0",
     "@ghuri/core": "^0.1.0-alpha.0",
     "@ghuri/orm": "^0.1.0-alpha.0",
+    "@ghuri/rest": "^0.1.0-alpha.0",
     "@types/node": "^24.0.0",
     "esbuild": "^0.27.7",
+    "graphql": "^17.1.0",
     "hono": "^4.13.0",
+    "miniflare": "^4.20260730.0",
     "tsup": "^8.5.1",
     "typescript": "~5.9.3",
-    "vitest": "^5.1.0",
-    "@ghuri/rest": "^0.1.0-alpha.0",
-    "@ghuri/auth": "^0.1.0-alpha.0",
-    "graphql": "^17.1.0"
+    "vitest": "^5.1.0"
   },
   "publishConfig": {
     "access": "public",
