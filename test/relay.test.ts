@@ -2,11 +2,12 @@ import { captureQueries, type QuerySet } from '@ghuri/orm'
 import { describe, expect, it } from 'vitest'
 import {
   Connection,
-  type ConnectionResult,
   ConnectionField,
+  type ConnectionResult,
   cursorToOffset,
   Field,
   fromGlobalId,
+  String as GString,
   Int,
   ModelType,
   Node,
@@ -15,7 +16,6 @@ import {
   Query,
   type ResolveInfo,
   Schema,
-  String as GString,
   toGlobalId,
 } from '../src/index'
 import { backends, fakeUser, useDatabase } from './helpers'
@@ -37,7 +37,8 @@ class CommentNode extends ModelType {
 class PostConnection extends Connection {
   static override fields = {
     publishedCount: Field(Int, {
-      resolve: (c: ConnectionResult<Post>) => (c.iterable as QuerySet<Post>).filter({ published: true }).count(),
+      resolve: (c: ConnectionResult<Post>) =>
+        (c.iterable as QuerySet<Post>).filter({ published: true }).count(),
     }),
   }
 }
@@ -201,7 +202,9 @@ describe.each(backends)('relay on %s', (backend) => {
     const prev = (await run(q, { before: last.data.allPosts.pageInfo.startCursor })) as any
     expect(titles(prev)).toEqual(['Post 4', 'Post 5'])
     expect(prev.data.allPosts.pageInfo).toMatchObject({ hasNextPage: true, hasPreviousPage: true })
-    const between = (await run(`{ allPosts(after: "${offsetToCursor(1)}", before: "${offsetToCursor(5)}") { edges { node { title } } } }`)) as any
+    const between = (await run(
+      `{ allPosts(after: "${offsetToCursor(1)}", before: "${offsetToCursor(5)}") { edges { node { title } } } }`,
+    )) as any
     expect(titles(between)).toEqual(['Post 3', 'Post 4', 'Post 5'])
   })
 
@@ -212,29 +215,41 @@ describe.each(backends)('relay on %s', (backend) => {
     expect(tooMany.errors?.[0].extensions?.code).toBe('BAD_USER_INPUT')
     const negative = await run('{ allPosts(last: -1) { totalCount } }')
     expect(negative.errors?.[0].message).toContain('non-negative')
-    const capped = (await run('{ publishedPosts { edges { node { title } } pageInfo { hasNextPage } } }')) as any
+    const capped = (await run(
+      '{ publishedPosts { edges { node { title } } pageInfo { hasNextPage } } }',
+    )) as any
     expect(titles(capped, 'publishedPosts')).toEqual(['Post 1', 'Post 3'])
     expect(capped.data.publishedPosts.pageInfo.hasNextPage).toBe(true)
-    expect((await run('{ publishedPosts(first: 3) { totalCount } }')).errors?.[0].message).toContain('limit of 2')
+    expect((await run('{ publishedPosts(first: 3) { totalCount } }')).errors?.[0].message).toContain(
+      'limit of 2',
+    )
   })
 
   it('filters with lookups, relations, global ids and and / or / not', async () => {
     const { ann, bob } = await seed()
-    const f = async (filter: string) => titles(await run(`{ allPosts(filter: ${filter}) { edges { node { title } } } }`))
+    const f = async (filter: string) =>
+      titles(await run(`{ allPosts(filter: ${filter}) { edges { node { title } } } }`))
     expect(await f('{ title: { icontains: "post 1" } }')).toEqual(['Post 1'])
-    expect(await f('{ published: { exact: true }, views: { gte: 30 } }')).toEqual(['Post 3', 'Post 5', 'Post 7'])
+    expect(await f('{ published: { exact: true }, views: { gte: 30 } }')).toEqual([
+      'Post 3',
+      'Post 5',
+      'Post 7',
+    ])
     expect(await f('{ views: { range: [20, 40] } }')).toEqual(['Post 2', 'Post 3', 'Post 4'])
     expect(await f('{ status: { in: [IN_REVIEW] } }')).toEqual(['Post 7'])
-    expect(await f(`{ author: { exact: "${toGlobalId('MemberNode', bob.id)}" } }`)).toEqual(['Post 5', 'Post 6', 'Post 7'])
+    expect(await f(`{ author: { exact: "${toGlobalId('MemberNode', bob.id)}" } }`)).toEqual([
+      'Post 5',
+      'Post 6',
+      'Post 7',
+    ])
     expect(await f(`{ author: { in: ["${ann.id}"] } }`)).toEqual(['Post 1', 'Post 2', 'Post 3', 'Post 4'])
     expect(await f('{ authorUsername: { exact: "bob" }, views: { lt: 60 } }')).toEqual(['Post 5'])
     expect(await f('{ tagsName: { exact: "js" } }')).toEqual(['Post 1', 'Post 2'])
     expect(await f('{ editor: { isnull: false } }')).toEqual(['Post 1'])
     expect(await f('{ or: [{ views: { lt: 20 } }, { views: { gt: 60 } }] }')).toEqual(['Post 1', 'Post 7'])
-    expect(await f('{ not: { authorUsername: { exact: "ann" } }, and: [{ published: { exact: true } }] }')).toEqual([
-      'Post 5',
-      'Post 7',
-    ])
+    expect(
+      await f('{ not: { authorUsername: { exact: "ann" } }, and: [{ published: { exact: true } }] }'),
+    ).toEqual(['Post 5', 'Post 7'])
     const year = new Date().getUTCFullYear()
     expect(await f(`{ createdAt: { year: ${year} } }`)).toHaveLength(7)
     const bad = await run('{ allPosts(filter: { views: { range: [1] } }) { totalCount } }')
@@ -247,7 +262,9 @@ describe.each(backends)('relay on %s', (backend) => {
     await seed()
     const desc = await run('{ allPosts(first: 3, orderBy: ["-views"]) { edges { node { title } } } }')
     expect(titles(desc)).toEqual(['Post 7', 'Post 6', 'Post 5'])
-    const two = await run('{ allPosts(orderBy: ["-author__username", "title"], first: 4) { edges { node { title } } } }')
+    const two = await run(
+      '{ allPosts(orderBy: ["-author__username", "title"], first: 4) { edges { node { title } } } }',
+    )
     expect(titles(two)).toEqual(['Post 5', 'Post 6', 'Post 7', 'Post 1'])
     const bad = await run('{ allPosts(orderBy: ["body"]) { totalCount } }')
     expect(bad.errors?.[0].message).toContain('Cannot order by "body"')
@@ -265,7 +282,11 @@ describe.each(backends)('relay on %s', (backend) => {
     }`)) as any
     expect(r.errors).toBeUndefined()
     expect(r.data.allPosts).toEqual({ publishedCount: 4, totalCount: 7 })
-    const anon = (await run('{ allPosts(first: 1) { publishedCount totalCount } }', undefined, fakeUser())) as any
+    const anon = (await run(
+      '{ allPosts(first: 1) { publishedCount totalCount } }',
+      undefined,
+      fakeUser(),
+    )) as any
     expect(anon.data.allPosts).toEqual({ publishedCount: 3, totalCount: 6 })
     expect(r.data.tagList).toEqual({ totalCount: 0, edges: [] })
     const member = r.data.members.edges[0].node
@@ -277,7 +298,8 @@ describe.each(backends)('relay on %s', (backend) => {
 
   it('batches nested connections (no N+1)', async () => {
     await seed()
-    const q = '{ members { edges { node { username posts { totalCount edges { node { title comments { totalCount } } } } } } } }'
+    const q =
+      '{ members { edges { node { username posts { totalCount edges { node { title comments { totalCount } } } } } } } }'
     const [r, queries] = await captureQueries(() => run(q))
     expect(r.errors).toBeUndefined()
     // members count is not needed (no last / totalCount); members, posts, comments

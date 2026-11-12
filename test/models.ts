@@ -21,6 +21,7 @@ import {
   PositiveIntegerField,
   PositiveSmallIntegerField,
   type RelatedManager,
+  registerFieldClass,
   SET_NULL,
   SlugField,
   SmallIntegerField,
@@ -43,6 +44,12 @@ export class FakeFileField extends CharField<{ maxLength: number; blank: true }>
   override toDb(value: any): any {
     return value && typeof value === 'object' ? value.name : value
   }
+}
+
+// migrations state (used when an app with migrations, e.g. auth, is installed) needs to know the type
+if (!(globalThis as any).__ghuriFakeFile) {
+  ;(globalThis as any).__ghuriFakeFile = true
+  registerFieldClass(FakeFileField as any)
 }
 
 export class Member extends Model({

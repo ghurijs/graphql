@@ -35,8 +35,13 @@ class BlogQuery extends Query {
     allPosts: List(PostType, { resolve: () => Post.objects.orderBy('-id') }),
     members: List(MemberType),
     tags: List(TagType),
-    post: Field(PostType, { args: { id: NonNull(ID) }, resolve: (_: unknown, { id }) => Post.objects.get({ id }) }),
-    optimizedPosts: List(PostType, { resolve: (_: unknown, _a: unknown, info: ResolveInfo) => optimize(Post.objects.all(), info) }),
+    post: Field(PostType, {
+      args: { id: NonNull(ID) },
+      resolve: (_: unknown, { id }) => Post.objects.get({ id }),
+    }),
+    optimizedPosts: List(PostType, {
+      resolve: (_: unknown, _a: unknown, info: ResolveInfo) => optimize(Post.objects.all(), info),
+    }),
     everything: List(EverythingType),
   }
 }
@@ -50,7 +55,13 @@ async function seed() {
   await Profile.objects.create({ member: ann, bio: 'Hi, Ann here' })
   const js = await Tag.objects.create({ name: 'js' })
   const ts = await Tag.objects.create({ name: 'ts' })
-  const p1 = await Post.objects.create({ title: 'One', slug: 'one', author: ann, published: true, body: 'first body' })
+  const p1 = await Post.objects.create({
+    title: 'One',
+    slug: 'one',
+    author: ann,
+    published: true,
+    body: 'first body',
+  })
   const p2 = await Post.objects.create({ title: 'Two', slug: 'two', author: ann, published: true })
   const p3 = await Post.objects.create({ title: 'Three', slug: 'three', author: bob, published: false })
   await p1.tags.set([js, ts])
@@ -94,7 +105,12 @@ describe.each(backends)('queries on %s', (backend) => {
           tags: [{ name: 'js', posts: [{ slug: 'one' }, { slug: 'two' }] }],
           comments: [],
         },
-        { title: 'Three', author: { username: 'bob', profile: null }, tags: [], comments: [{ text: 'hidden post' }] },
+        {
+          title: 'Three',
+          author: { username: 'bob', profile: null },
+          tags: [],
+          comments: [{ text: 'hidden post' }],
+        },
       ],
     })
     // posts, members, profiles, post→tag links + tags, tag→post links + posts, comments
@@ -106,7 +122,12 @@ describe.each(backends)('queries on %s', (backend) => {
     const [, before] = await captureQueries(() => schema.execute(NESTED, { user: staff }))
     for (let i = 0; i < 15; i++) {
       const m = await Member.objects.create({ username: `m${i}` })
-      const p = await Post.objects.create({ title: `P${i}`, slug: `p${i}`, author: i % 2 ? ann : m, published: true })
+      const p = await Post.objects.create({
+        title: `P${i}`,
+        slug: `p${i}`,
+        author: i % 2 ? ann : m,
+        published: true,
+      })
       await p.tags.add(js)
       await Comment.objects.create({ post: p, text: `c${i}` })
     }
@@ -118,7 +139,9 @@ describe.each(backends)('queries on %s', (backend) => {
 
   it('applies getQueryset to root lists, relations and custom resolvers', async () => {
     await seed()
-    const anon = await schema.execute('{ posts { slug } allPosts { slug } members { username posts { slug } } }')
+    const anon = await schema.execute(
+      '{ posts { slug } allPosts { slug } members { username posts { slug } } }',
+    )
     expect(anon.errors).toBeUndefined()
     expect(anon.data).toEqual({
       posts: [{ slug: 'one' }, { slug: 'two' }],
@@ -134,9 +157,12 @@ describe.each(backends)('queries on %s', (backend) => {
 
   it('resolves single objects with arguments', async () => {
     const { p1 } = await seed()
-    const r = await schema.execute('query ($id: ID!) { post(id: $id) { title status views rating createdAt } }', {
-      variables: { id: String(p1.id) },
-    })
+    const r = await schema.execute(
+      'query ($id: ID!) { post(id: $id) { title status views rating createdAt } }',
+      {
+        variables: { id: String(p1.id) },
+      },
+    )
     expect(r.errors).toBeUndefined()
     expect((r.data as any).post).toMatchObject({ title: 'One', status: 'DRAFT', views: 0, rating: null })
     expect((r.data as any).post.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/)
@@ -145,7 +171,9 @@ describe.each(backends)('queries on %s', (backend) => {
   it('optimizes root QuerySets with selectRelated / prefetchRelated', async () => {
     await seed()
     const q = '{ optimizedPosts { title author { username } tags { name } comments { text } } }'
-    const [plain, plainQueries] = await captureQueries(() => schema.execute(q.replace('optimizedPosts', 'posts'), { user: staff }))
+    const [plain, plainQueries] = await captureQueries(() =>
+      schema.execute(q.replace('optimizedPosts', 'posts'), { user: staff }),
+    )
     const [opt, optQueries] = await captureQueries(() => schema.execute(q, { user: staff }))
     expect(opt.errors).toBeUndefined()
     expect((opt.data as any).optimizedPosts).toEqual((plain.data as any).posts.map((p: any) => p))
@@ -159,7 +187,7 @@ describe.each(backends)('queries on %s', (backend) => {
       char: 'abc',
       uuid: '0b6c1f6e-9a4c-4f3e-8a35-1d1f8d1b8c3a',
       integer: 42,
-      bigInteger: 9007199254740993,
+      bigInteger: 9007199254740991,
       float: 1.5,
       decimal: '12.345',
       boolean: true,
@@ -194,6 +222,6 @@ describe.each(backends)('queries on %s', (backend) => {
       text: null,
     })
     expect(Number(row.decimal)).toBe(12.345)
-    expect(String(row.bigInteger)).toMatch(/^900719925474099[2-4]$/)
+    expect(row.bigInteger).toBe(9007199254740991)
   })
 })

@@ -1,6 +1,7 @@
 // `ModelType`: GraphQL object types generated from ORM models (graphene-django's `DjangoObjectType`).
 import type { ModelClass, QuerySet } from '@ghuri/orm'
 import { GraphQLConfigurationError } from '../errors'
+import { loadNode } from '../loaders'
 import type { PermissionClassLike } from '../permissions'
 import { isQuerySet } from '../utils'
 import { ObjectType, type ObjectTypeMeta, type ResolveInfo, type TypeRef } from './definitions'
@@ -63,7 +64,6 @@ export class ModelType extends ObjectType {
 
   /** Fetch one object by primary key for `node(id:)` (default: through `getQueryset`, batched). */
   static async getNode(id: unknown, info: ResolveInfo): Promise<unknown> {
-    const { loadNode } = await import('../loaders')
     return loadNode(this, id, info)
   }
 }
