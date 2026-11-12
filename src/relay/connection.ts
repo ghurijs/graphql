@@ -7,7 +7,7 @@ import {
   FieldDef,
   type FieldsInput,
   type Resolver,
-  registerType,
+  rememberType,
   type TypeMeta,
   type TypeRef,
 } from '../types/definitions'
@@ -112,7 +112,7 @@ export function ConnectionField<TParent = any>(
   type: TypeRef,
   options: ConnectionFieldOptions<TParent> = {},
 ): FieldDef {
-  if (typeof type === 'function' && (type as any).__ghuriType) registerType(type as Function)
+  if (typeof type === 'function' && (type as any).__ghuriType) rememberType(type as Function)
   const { args, resolve, description, deprecationReason, permissionClasses, ...conn } = options
   return new FieldDef(
     { __ghuriWrapper: 'connection', node: type, ...conn },

@@ -143,17 +143,20 @@ describe('ModelType generation', () => {
     expect(typeBlock(sdl, 'CommentType')).not.toContain('approved')
   })
 
-  it('finds related types through the registry, and skips relations to models without a type', () => {
+  it('finds related types in the schema only, and skips relations to models without a type', () => {
     class Lonely extends ModelType {
       static override Meta = { model: Comment, name: 'Lonely' }
     }
-    // PostType is not referenced by this schema, but it is registered (List(PostType) above) → used
-    const s = new Schema({
-      query: class extends Query {
-        static override fields = { c: List(Lonely) }
-      },
-    })
-    expect(typeBlock(s.printSchema(), 'Lonely')).toContain('post: PostType!')
+    const LonelyQuery = class extends Query {
+      static override fields = { c: List(Lonely) }
+    }
+    // PostType exists (and is referenced by another schema above) but is not part of this one → skipped
+    const s = new Schema({ query: LonelyQuery })
+    expect(typeBlock(s.printSchema(), 'Lonely')).not.toContain('post')
+    expect(s.getType('PostType')).toBeUndefined()
+    // listed in `types` → used
+    const withPost = new Schema({ query: LonelyQuery, types: [PostType] })
+    expect(typeBlock(withPost.printSchema(), 'Lonely')).toContain('post: PostType!')
 
     class Owner extends Model({ name: new CharField({ maxLength: 10 }) }) {
       static Meta = { appLabel: 'blog' }

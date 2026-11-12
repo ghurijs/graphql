@@ -22,7 +22,11 @@ export interface SchemaOptions {
   query: Function | Function[]
   /** Mutation classes (`static fields` are merged into the root `Mutation` type). */
   mutation?: Function | Function[]
-  /** Extra types to include (e.g. types only reachable through `node(id:)` or generated relations). */
+  /**
+   * Extra types to include (e.g. types only reachable through `node(id:)` or generated relations). A schema
+   * only contains the types reachable from `query`, `mutation` and `types`; generated relations to models
+   * without a ModelType in this schema are skipped (never resolved to another schema's type).
+   */
   types?: TypeRef[]
   /** Apply the query optimizer to root list / connection QuerySets. */
   optimize?: boolean | OptimizeOptions

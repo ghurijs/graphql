@@ -359,16 +359,22 @@ export class TypeBuilder {
     }
   }
 
-  /** The ModelType used for relations to `model` (first discovered, else the global registry). */
+  /**
+   * The ModelType of THIS schema used for `model` in generated relations (FK, one-to-one, reverse FK, M2M),
+   * `ModelMutation` payloads / lookups and global-ID decoding. Resolution order:
+   *
+   * 1. the first ModelType of exactly `model` discovered by this schema, i.e. reachable from its `query`,
+   *    `mutation` or `types` (through declared fields, arguments, interfaces, union members, connection
+   *    classes and mutation inputs / outputs);
+   * 2. else the first discovered ModelType of a parent class of `model` (proxy-like subclasses);
+   * 3. else none: the relation is skipped (a configuration error when it is listed in `Meta.fields`).
+   *
+   * Never a type of another schema: there is no process-wide fallback, so with several schemas (e.g. an
+   * admin API and a public API) a relation can never expose another schema's fields.
+   */
   typeForModel(model: ModelClass): ModelTypeClass | undefined {
     const found = this.modelTypes.get(model)
     if (found) return found
-    for (const cls of registeredTypes()) {
-      if (isModelTypeClass(cls) && modelOf(cls) === model) {
-        this.discover(cls)
-        return cls
-      }
-    }
     // subclass models (proxy-like) → nearest parent with a type
     for (const [m, cls] of this.modelTypes) if (isSubclassOf(model, m as any)) return cls
     return undefined
@@ -487,8 +493,9 @@ export class TypeBuilder {
     }
   }
 
+  /** A type referenced by name: only classes of this schema (never the process-wide `registerType` list). */
   private typeByClassName(name: string): GraphQLNamedType | undefined {
-    for (const cls of [...this.discovered, ...registeredTypes()]) {
+    for (const cls of [...this.discovered]) {
       if (typeNameOf(cls) === name) return this.classType(cls)
     }
     return undefined
@@ -1075,8 +1082,13 @@ export class TypeBuilder {
     const target = this.typeForModel(model)
     if (target) return target
     if (entry.explicit) {
+      // `registerType` / `Field()` remember every referenced class process-wide; only used for this hint
+      const elsewhere = registeredTypes().filter((t) => isModelTypeClass(t) && modelOf(t) === model)
+      const hint = elsewhere.length
+        ? ` (${elsewhere.map((t) => t.name).join(', ')} ${elsewhere.length > 1 ? 'are' : 'is'} not part of this schema)`
+        : ''
       throw new GraphQLConfigurationError(
-        `${cls.name}.${entry.name}: no ModelType for ${model._meta.label} is known. Define one and reference it (Schema({ types: [...] })).`,
+        `${cls.name}.${entry.name}: no ModelType for ${model._meta.label} is part of this schema${hint}. Reference one from this schema's fields or list it in Schema({ types: [...] }).`,
       )
     }
     return null
@@ -1418,8 +1430,9 @@ export class TypeBuilder {
     if (onlyName && g.type !== onlyName) {
       throw new GraphQLError(`Must receive a ${onlyName} id.`, { extensions: { code: 'BAD_USER_INPUT' } })
     }
+    // only Node types of this schema (classByName is per builder; the schema check is a second guard)
     const cls = this.classByName.get(g.type)
-    if (!cls || !this.implementsNode(cls)) {
+    if (!cls || !this.implementsNode(cls) || !info.schema.getType(g.type)) {
       throw new GraphQLError(`Relay Node "${g.type}" not found in schema.`, {
         extensions: { code: 'BAD_USER_INPUT' },
       })

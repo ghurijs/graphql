@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- **Security fix: relation types are resolved per schema.** With several `Schema`s in one process, a generated
+  relation (`ForeignKey`, one-to-one, reverse FK, M2M) on one schema's `ModelType` could resolve to a `ModelType`
+  of the *other* schema for the same model, through the process-wide registry `TypeBuilder.typeForModel` fell
+  back to. A public schema could then expose an admin-only type and its fields (in the SDL, through the relation
+  and through `node(id:)`). A schema now only uses types reachable from its own `query`, `mutation` and `types`:
+  relations to a model without a `ModelType` in the schema are skipped (an error when listed in `Meta.fields`),
+  as documented. The same scoping applies to `node` / `nodes` (an ID of another schema's type is `Relay Node "X"
+  not found in schema.`), connection types, global-ID decoding in filters and mutation inputs, `ModelMutation`
+  payloads and lookups, and type references by name.
+- Behaviour change: a `ModelType` that was only reachable through the registry (referenced by `Field()` / `List()`
+  in a class outside the schema, or `registerType()`) is no longer added to a schema; list it in
+  `new Schema({ types: [...] })`. `registerType()` is deprecated (it only feeds configuration error hints now).
+- The error for a relation listed in `Meta.fields` without a type now reads `X.field: no ModelType for app.Model is
+  part of this schema (...)` and names the `ModelType`s that exist outside the schema.
+
 ## 0.1.0-alpha.1
 
 - `GraphQLView` throttling with the `@ghuri/rest` throttle classes: `throttleClasses` / `throttleScope` options

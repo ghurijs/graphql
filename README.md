@@ -85,6 +85,19 @@ Field mapping (`internalType`, walking up the class chain; add your own with
 Fields are non-null unless the model field has `null: true`. Relations to models that have no `ModelType` are
 skipped (an error if you list them in `fields`).
 
+A generated relation (and a `ModelMutation` payload / lookup, and global-ID decoding) uses the `ModelType` **of the
+schema being built**, in this order:
+
+1. the first `ModelType` of that model the schema reaches from its `query`, `mutation` or `types` (through
+   declared fields, arguments, interfaces, union members, connection classes and mutation inputs / outputs);
+2. else the first one of a parent model (proxy-like subclasses);
+3. else none: the relation is skipped (an error if you list it in `fields`).
+
+There is no process-wide fallback: a `ModelType` that is only used by another schema (or by none) is never picked
+up, so several schemas in one process (say a merchant `admin` API and a public `storefront` API with a smaller
+`ProductVariant` type) cannot leak each other's fields through relations, `node(id:)` or type names. Put types
+that are only reachable through relations in `types: [...]` (see below).
+
 Plain types work like graphene's:
 
 ```ts
@@ -127,7 +140,14 @@ export const schema = new Schema({ query: [BlogQuery, ShopQuery], mutation: [Blo
 
 The schema is built on first use, so `src/schema.ts` can be imported from your settings (`GRAPHQL.SCHEMA`)
 before the apps are loaded; `schema.validate()` builds it eagerly (configuration errors throw). Model types that
-are only reachable through relations (e.g. `CommentType` via `post.comments`) go in `types: [...]`.
+are only reachable through relations (e.g. `CommentType` via `post.comments`) go in `types: [...]`; a schema
+only contains the types reachable from its own `query`, `mutation` and `types`, so each of several schemas
+lists its own:
+
+```ts
+export const admin = new Schema({ query: AdminQuery, types: [AdminVariantType] })
+export const storefront = new Schema({ query: StorefrontQuery, types: [VariantType] })  // never AdminVariantType
+```
 
 Resolvers receive `(parent, args, info)`; `info.context` is `{ c, user, auth, loaders, request, state }` (`c` is
 the Hono context). Argument types are inferred from `args`. `schema.execute(query, { user, variables })` runs an
@@ -163,7 +183,8 @@ class RelayQuery extends Query {
 ```
 
 Global IDs are `base64("PostType:42")` (`toGlobalId` / `fromGlobalId`). Plain `ObjectType`s can implement `Node`
-with a `static getNode(id, info)`.
+with a `static getNode(id, info)`. `node` / `nodes` only resolve `Node` types of the schema they are in (an ID of
+another schema's type gives `Relay Node "X" not found in schema.`).
 
 ```graphql
 {
@@ -450,7 +471,9 @@ Options: `variables`, `operationName`, `headers`, `path` (default `/graphql/`, o
 | `convert_choices_to_enum` | `Meta.convertChoicesToEnum` |
 | `DjangoListField` | `List(ModelType)` (applies `getQueryset`) |
 
-Differences worth knowing: generated mutation payloads are named `<Mutation>Payload`; connection edges are
+Differences worth knowing: there is no global type registry, every schema resolves relations to its own types
+(graphene-django's default registry is process-wide; `registerType()` is deprecated and adds nothing to a
+schema); generated mutation payloads are named `<Mutation>Payload`; connection edges are
 `[XEdge!]!` with `totalCount` built in; DataLoaders are built in (no `graphene-django-optimizer` needed);
 subscriptions are not supported yet.
 

@@ -127,16 +127,27 @@ export type TsOf<R> =
 /** Argument values of an `ArgsInput` map. */
 export type InferArgs<A> = A extends ArgsInput ? { [K in keyof A]: TsOf<A[K]> } : Record<string, any>
 
-// ---- global registry of referenced type classes ---------------------------------------------------
+// ---- process-wide list of referenced type classes (error hints only) --------------------------------
 
 const registered: Function[] = []
 const registeredSet = new Set<Function>()
 
 /**
- * Remember a type class so schemas can find it even when it is only reachable through generated model
- * relations (graphene-django's registry). `Field()`, `List()`, `ConnectionField()`… call this for you.
+ * Remember a type class process-wide. `Field()`, `List()`, `ConnectionField()`… call this for you.
+ *
+ * Schemas never look types up in this list: a schema only contains the types reachable from its own `query`,
+ * `mutation` and `types` (so two schemas in one process cannot leak each other's types through generated
+ * relations, `node(id:)` or type names). The list only improves configuration error messages.
+ *
+ * @deprecated Registering a type no longer adds it to any schema. List types that are only reachable through
+ * generated relations in `new Schema({ types: [...] })`.
  */
 export function registerType<T extends Function>(cls: T): T {
+  return rememberType(cls)
+}
+
+/** @internal remember a referenced type class (for error hints; never consulted when building a schema). */
+export function rememberType<T extends Function>(cls: T): T {
   if (typeof cls === 'function' && (cls as any).__ghuriType && !registeredSet.has(cls)) {
     registeredSet.add(cls)
     registered.push(cls)
@@ -144,13 +155,13 @@ export function registerType<T extends Function>(cls: T): T {
   return cls
 }
 
-/** @internal every registered type class, in registration order. */
+/** @internal every remembered type class, in registration order (error hints only). */
 export function registeredTypes(): readonly Function[] {
   return registered
 }
 
 function registerRef(ref: unknown): void {
-  if (typeof ref === 'function' && (ref as any).__ghuriType) registerType(ref)
+  if (typeof ref === 'function' && (ref as any).__ghuriType) rememberType(ref)
   else if (isTypeWrapper(ref)) registerRef((ref as any).ofType ?? (ref as any).node)
   else if (isFieldDef(ref)) registerRef(ref.type)
 }
