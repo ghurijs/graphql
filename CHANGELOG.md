@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-alpha.2
 
 - **Security fix: relation types are resolved per schema.** With several `Schema`s in one process, a generated
   relation (`ForeignKey`, one-to-one, reverse FK, M2M) on one schema's `ModelType` could resolve to a `ModelType`
