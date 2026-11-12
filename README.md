@@ -20,7 +20,7 @@ npm install @ghuri/graphql graphql
 4. [Relay: nodes, connections, filters, ordering](#4-relay-nodes-connections-filters-and-ordering)
 5. [Mutations](#5-mutations)
 6. [Authentication and permissions](#6-authentication-and-permissions)
-7. [The view, GraphiQL and settings](#7-the-view-graphiql-and-settings)
+7. [The view, GraphiQL, throttling and settings](#7-the-view-graphiql-and-settings)
 8. [Performance](#8-performance)
 9. [Testing](#9-testing)
 10. [For graphene-django users](#10-for-graphene-django-users)
@@ -329,6 +329,44 @@ GraphQL over HTTP (spec-compliant):
 - GraphiQL (pinned CDN assets) for browsers when `graphiql` / `GRAPHQL.GRAPHIQL` / `DEBUG`; it sends the CSRF
   token. Add `?raw` to get JSON in a browser.
 
+### Throttling
+
+`throttleClasses` takes the `@ghuri/rest` throttles as they are (`AnonRateThrottle`, `UserRateThrottle`,
+`ScopedRateThrottle` with `throttleScope`, your own `SimpleRateThrottle` subclasses); the default is
+`GRAPHQL.DEFAULT_THROTTLE_CLASSES`, else none (`REST_FRAMEWORK.DEFAULT_THROTTLE_CLASSES` does not apply to
+GraphQL). Rates come from `REST_FRAMEWORK.DEFAULT_THROTTLE_RATES` and request history from the
+`REST_FRAMEWORK.THROTTLE_CACHE` cache (default `'default'`: use a shared cache such as `kvCache()` in production).
+
+- Checked once per HTTP request (a batch of operations counts once), after authentication (so
+  `UserRateThrottle` sees the user) and before anything executes. Requests rejected earlier (406, 415, malformed
+  JSON) are not counted.
+- Throttled → **429**, `Retry-After: <seconds>` when the throttle knows the wait, and
+  `{ "errors": [{ "message": "Request was throttled. Expected available in 42 seconds.", "extensions": { "code": "THROTTLED", "wait": 42 } }] }`
+  (`wait: null` and no `Retry-After` when unknown).
+- The GraphiQL page (`GET` from a browser) is never throttled; the operations it sends are.
+- Throttles receive a `PermissionRequest` (`user`, `auth`, `method`, `header()`, `c`) and the view. Override
+  `throttled(request, wait)` to change the error (throwing REST's `Throttled` works).
+
+Per-token limits for a public storefront API:
+
+```ts
+import { SimpleRateThrottle, AnonRateThrottle } from '@ghuri/rest'
+
+class StorefrontTokenThrottle extends SimpleRateThrottle {
+  scope = 'storefront'
+  getCacheKey(request) {
+    const token = request.header('X-Storefront-Token')
+    return token ? this.formatKey({ scope: this.scope, ident: token }) : null   // null: not throttled
+  }
+}
+
+path('storefront/graphql/', GraphQLView.asView({ schema, throttleClasses: [StorefrontTokenThrottle, AnonRateThrottle] }))
+
+// settings
+REST_FRAMEWORK: { DEFAULT_THROTTLE_RATES: { storefront: '1000/min', anon: '60/min' } },
+CACHES: { default: kvCache('CACHE') },
+```
+
 Settings (`GRAPHQL`, typed via `GhuriSettings`):
 
 ```ts
@@ -341,6 +379,7 @@ GRAPHQL: {
   RELAY_CONNECTION_MAX_LIMIT: 100,
   BATCH: false,
   AUTHENTICATION_CLASSES: [SessionAuthentication, TokenAuthentication],
+  DEFAULT_THROTTLE_CLASSES: [AnonRateThrottle, UserRateThrottle],   // default: none
   OPTIMIZE: false,
 }
 ```
@@ -360,7 +399,7 @@ ghuri graphql_schema --json --out schema.json
   `new Schema({ …, optimize: true })` / `GRAPHQL.OPTIMIZE` for every root list and connection. Forward foreign
   keys become `selectRelated`, argument-less reverse / M2M lists `prefetchRelated` (only for related types with
   the default `getQueryset`), `{ only: true }` also restricts columns.
-- `maxDepth` / `maxComplexity` protect the API from expensive queries.
+- `maxDepth` / `maxComplexity` protect the API from expensive queries; `throttleClasses` from abusive clients.
 
 ## 9. Testing
 

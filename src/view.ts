@@ -28,6 +28,7 @@ import type { Context } from 'hono'
 import { createGraphQLContext, type GraphQLContext } from './context'
 import { formatError } from './errors'
 import { renderGraphiQL } from './graphiql'
+import { PermissionRequest } from './permissions'
 import { toGraphQLSchema } from './schema'
 import { type GraphQLSettings, graphqlSettings, type SchemaLike } from './settings'
 import type { MaybePromise } from './utils'
@@ -40,6 +41,29 @@ export const JSON_MEDIA_TYPE = 'application/json'
 export type GraphQLAuthenticationClass = new () => {
   authenticate(c: Context): Promise<[RequestUser, unknown] | null>
   authenticateHeader?(c: Context): string | undefined
+}
+
+/**
+ * A throttle class: `AnonRateThrottle`, `UserRateThrottle`, `ScopedRateThrottle` or your own `BaseThrottle` /
+ * `SimpleRateThrottle` subclass from `@ghuri/rest`. `allowRequest(request, view)` receives a `PermissionRequest`
+ * (`user`, `auth`, `method`, `header()`, `c`) and the view.
+ */
+export type GraphQLThrottleClass = new () => GraphQLThrottle
+
+/** A throttle instance (DRF's `BaseThrottle` interface). */
+export interface GraphQLThrottle {
+  allowRequest(request: any, view: any): MaybePromise<boolean>
+  /** Seconds until the next request is allowed, or null when unknown. */
+  wait?(): number | null
+}
+
+/** Default message of a throttled request (DRF's `Throttled`). */
+export const THROTTLED_MESSAGE = 'Request was throttled.'
+
+/** `Request was throttled. Expected available in N seconds.` (DRF's `Throttled` detail). */
+export function throttledMessage(wait: number | null, detail: string = THROTTLED_MESSAGE): string {
+  if (wait === null) return detail
+  return `${detail} Expected available in ${wait} second${wait === 1 ? '' : 's'}.`
 }
 
 /** The parameters of one GraphQL request. */
@@ -75,6 +99,7 @@ class HttpProblem extends Error {
     message: string,
     readonly headers: Record<string, string> = {},
     readonly code?: string,
+    readonly extensions: Record<string, unknown> = {},
   ) {
     super(message)
   }
@@ -151,6 +176,10 @@ interface OneResult {
  * - `authenticationClasses` from `@ghuri/auth/rest` (`SessionAuthentication` enforces CSRF; token / JWT
  *   requests are exempt). Without them the core request user is used and CSRF is enforced for authenticated
  *   POSTs (the view itself is exempt from `CsrfMiddleware` so token clients work).
+ * - `throttleClasses` from `@ghuri/rest` (`AnonRateThrottle`, `UserRateThrottle`, `ScopedRateThrottle` with
+ *   `throttleScope`, …; default `GRAPHQL.DEFAULT_THROTTLE_CLASSES`): checked once per HTTP request (a batch counts
+ *   once) after authentication and before execution; throttled requests get 429 + `Retry-After` and
+ *   `extensions.code: "THROTTLED"`. The GraphiQL page itself is never throttled.
  * - `maxDepth`, `maxComplexity`, `introspection`, `batch` (default from `GRAPHQL` settings).
  * - Unexpected errors are masked as "Internal server error" unless `DEBUG`.
  */
@@ -165,6 +194,13 @@ export class GraphQLView extends View {
   batch?: boolean
   /** Authentication classes (default `GRAPHQL.AUTHENTICATION_CLASSES`, else the core request user). */
   authenticationClasses?: GraphQLAuthenticationClass[]
+  /**
+   * Throttle classes (default `GRAPHQL.DEFAULT_THROTTLE_CLASSES`, else none). Rates come from
+   * `REST_FRAMEWORK.DEFAULT_THROTTLE_RATES`, history from the `REST_FRAMEWORK.THROTTLE_CACHE` cache.
+   */
+  throttleClasses?: GraphQLThrottleClass[]
+  /** Scope for `ScopedRateThrottle` (a key of `REST_FRAMEWORK.DEFAULT_THROTTLE_RATES`). */
+  throttleScope?: string
   maxDepth?: number
   maxComplexity?: number
   /** Allow introspection (default `GRAPHQL.INTROSPECTION`, true). */
@@ -213,7 +249,7 @@ export class GraphQLView extends View {
 
   protected problem(c: Context, p: HttpProblem, mediaType: string): Response {
     const error: GraphQLFormattedError = p.code
-      ? { message: p.message, extensions: { code: p.code } }
+      ? { message: p.message, extensions: { code: p.code, ...p.extensions } }
       : { message: p.message }
     return this.respond(c, p.status, { errors: [error] }, mediaType, p.headers)
   }
@@ -263,6 +299,16 @@ export class GraphQLView extends View {
       auth = await this.authenticate(c, method, settings)
     } catch (err) {
       const p = this.authProblem(err)
+      if (p) return this.problem(c, p, mediaType)
+      throw err
+    }
+    try {
+      await this.checkThrottles(
+        new PermissionRequest({ c, user: auth.user, auth: auth.auth, method }),
+        settings,
+      )
+    } catch (err) {
+      const p = err instanceof HttpProblem ? err : this.throttleProblem(err)
       if (p) return this.problem(c, p, mediaType)
       throw err
     }
@@ -373,6 +419,43 @@ export class GraphQLView extends View {
     if (status === 401 && typeof www === 'string') headers['WWW-Authenticate'] = www
     const message = typeof e.detail === 'string' ? e.detail : (e.message ?? 'Authentication failed.')
     return new HttpProblem(status, message, headers, status === 401 ? 'UNAUTHENTICATED' : 'PERMISSION_DENIED')
+  }
+
+  // ---- throttling --------------------------------------------------------------------------------------
+
+  /** Instantiate the throttle classes (DRF's `get_throttles()`). */
+  getThrottles(settings: GraphQLSettings): GraphQLThrottle[] {
+    return (this.throttleClasses ?? settings.DEFAULT_THROTTLE_CLASSES ?? []).map((T) => new T())
+  }
+
+  /**
+   * Run every throttle once for this HTTP request (DRF's `check_throttles()`): all of them are consulted, and
+   * when any refuses, `throttled()` is called with the longest known wait.
+   */
+  async checkThrottles(request: PermissionRequest, settings: GraphQLSettings): Promise<void> {
+    const durations: Array<number | null> = []
+    for (const throttle of this.getThrottles(settings)) {
+      if (!(await throttle.allowRequest(request, this))) durations.push(throttle.wait?.() ?? null)
+    }
+    if (!durations.length) return
+    const known = durations.filter((d): d is number => d !== null && d !== undefined)
+    this.throttled(request, known.length ? Math.max(...known) : null)
+  }
+
+  /** Called when a throttle refuses the request: raises the 429 (DRF's `throttled()`; override to customize). */
+  throttled(_request: PermissionRequest, wait: number | null): never {
+    throw throttleHttpProblem(wait === null ? null : Math.ceil(wait))
+  }
+
+  /** Map an error raised by a `throttled()` override (e.g. REST's `Throttled`) to a 429. */
+  protected throttleProblem(err: unknown): HttpProblem | null {
+    const e = err as any
+    const status: number | undefined =
+      typeof e?.statusCode === 'number' ? e.statusCode : typeof e?.status === 'number' ? e.status : undefined
+    if (status !== 429) return null
+    const wait = typeof e.wait === 'number' ? Math.ceil(e.wait) : null
+    const message = typeof e.detail === 'string' ? e.detail : (e.message ?? throttledMessage(wait))
+    return throttleHttpProblem(wait, message)
   }
 
   // ---- execution ---------------------------------------------------------------------------------------
@@ -515,6 +598,16 @@ function graphqlSettingsCsrfHeader(c: Context): string | undefined {
   } catch {
     return undefined
   }
+}
+
+function throttleHttpProblem(wait: number | null, message?: string): HttpProblem {
+  return new HttpProblem(
+    429,
+    message ?? throttledMessage(wait),
+    wait === null ? {} : { 'Retry-After': String(wait) },
+    'THROTTLED',
+    { wait },
+  )
 }
 
 function parseJsonParam(value: unknown, name: string): unknown {
