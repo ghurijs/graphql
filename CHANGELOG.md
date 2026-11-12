@@ -2,4 +2,23 @@
 
 ## 0.1.0-alpha.0
 
-- Initial alpha.
+- Initial alpha (ARCHITECTURE.md §15).
+- Code-first type system on graphql-js 17: `ObjectType`, `InputObjectType`, `Interface`, `Union`, `Enum`,
+  `Field` / `List` / `NonNull` / `Argument`, scalars (`DateTime`, `Date`, `Time`, `Decimal`, `JSON`, `UUID`,
+  `BigInt`, `Base64`), `Query` / `Mutation` classes merged by `Schema` across apps.
+- `ModelType`: object types from ORM `_meta` (every field type, choices → enums, FK / reverse FK / M2M / one-to-one
+  relations, file URLs), `resolveX` methods, `getQueryset()` row-level scoping, type permission classes,
+  `registerFieldConverter()`.
+- Per-request DataLoaders for every relation (no N+1) and an optional `selectRelated` / `prefetchRelated` / `only`
+  optimizer.
+- Relay: `Node` interface, global IDs, `node` / `nodes` fields, `ConnectionField` with cursor pagination
+  (both directions, `totalCount`, `RELAY_CONNECTION_MAX_LIMIT`), nested `filter:` inputs from `filterFields`
+  (ORM lookups, and / or / not, global IDs), `orderBy`, custom connection classes.
+- Mutations: `Mutation`, `ClientIDMutation`, `SerializerMutation` (REST serializers, `errors: [ErrorType]`),
+  `ModelMutation` (create / update / delete via `lookupField`, REST permission classes).
+- Auth: `loginRequired`, `staffMemberRequired`, `superuserRequired`, `permissionRequired`, `userPassesTest`;
+  permission classes on fields, mutations and types.
+- `GraphQLView`: GraphQL over HTTP (GET / POST, `application/graphql-response+json` status codes), GraphiQL,
+  REST authentication classes, CSRF for session auth only, batching, depth / complexity limits, introspection
+  toggle, persisted queries, error masking.
+- `GRAPHQL` settings, `GraphQLConfig` app with the `graphql_schema` command, `@ghuri/graphql/testing`.
