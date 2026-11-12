@@ -22,7 +22,8 @@
       },
       "complexity": {
         "noBannedTypes": "off",
-        "noThisInStatic": "off"
+        "noThisInStatic": "off",
+        "noStaticOnlyClass": "off"
       }
     }
   },
