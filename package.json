@@ -1,6 +1,6 @@
 {
   "name": "@ghuri/graphql",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "Ghuri GraphQL: graphene-django style schemas from your models, with REST serializers, permissions and auth reused",
   "type": "module",
   "license": "MIT",
