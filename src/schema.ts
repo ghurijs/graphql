@@ -13,7 +13,7 @@ import {
 import type { Context } from 'hono'
 import { declaredFields, TypeBuilder } from './builder'
 import { createGraphQLContext, type GraphQLContext, isGraphQLContext } from './context'
-import { GraphQLConfigurationError } from './errors'
+import { GraphQLConfigurationError, withErrorCode } from './errors'
 import type { OptimizeOptions } from './optimizer'
 import type { TypeRef } from './types/definitions'
 
@@ -82,12 +82,15 @@ export class Schema {
     assertValidSchema(this.graphqlSchema)
   }
 
-  /** Run an operation (no HTTP): `await schema.execute('{ me { username } }', { user })`. */
+  /**
+   * Run an operation (no HTTP): `await schema.execute('{ me { username } }', { user })`. Errors are not masked
+   * (unlike `GraphQLView`) but carry `extensions.code`.
+   */
   async execute(source: string, opts: ExecuteOptions = {}): Promise<ExecutionResult> {
     const contextValue = isGraphQLContext(opts.context)
       ? opts.context
       : createGraphQLContext({ c: opts.c, user: opts.user, auth: opts.auth, extra: opts.context })
-    return graphql({
+    const result = await graphql({
       schema: this.graphqlSchema,
       source,
       rootValue: opts.rootValue,
@@ -95,6 +98,7 @@ export class Schema {
       variableValues: opts.variables ?? undefined,
       operationName: opts.operationName ?? undefined,
     })
+    return result.errors ? { ...result, errors: result.errors.map(withErrorCode) } : result
   }
 
   /** The schema in SDL. */

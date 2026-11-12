@@ -83,9 +83,7 @@ export class Mutation extends ObjectType {
   static mutate?(root: unknown, args: any, info: ResolveInfo): unknown
 
   /** The root field for this mutation: `createPost: CreatePost.field()`. */
-  static field(
-    this: typeof Mutation,
-    options: Pick<FieldOptions, 'description' | 'deprecationReason'> = {},
+  static field(options: Pick<FieldOptions, 'description' | 'deprecationReason'> = {},
   ): FieldDef {
     return new FieldDef({ __ghuriWrapper: 'mutation', mutation: this }, options)
   }

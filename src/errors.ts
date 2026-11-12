@@ -109,3 +109,16 @@ export function formatError(error: GraphQLError, opts: FormatErrorOptions = {}):
       : formatted.message
   return { ...formatted, message, extensions }
 }
+
+/** Copy of `error` with `extensions.code` set (unmasked: for `schema.execute()` / tests). */
+export function withErrorCode(error: GraphQLError): GraphQLError {
+  if (error.extensions?.code !== undefined || !error.originalError) return error
+  return new GraphQLError(error.message, {
+    nodes: error.nodes,
+    source: error.source,
+    positions: error.positions,
+    path: error.path,
+    originalError: error.originalError,
+    extensions: { ...error.extensions, code: errorCode(error.originalError) },
+  })
+}

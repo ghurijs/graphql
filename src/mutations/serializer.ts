@@ -266,23 +266,27 @@ export class SerializerMutation extends ClientIDMutation {
   static override extraPayloadFields(b: TypeBuilder): GraphQLFieldConfigMap<any, any> {
     const meta = this.smeta()
     const out: GraphQLFieldConfigMap<any, any> = {}
+    const pk = this.model()?._meta.pk
     for (const [name, f] of serializerFields(meta.serializerClass, meta)) {
       if (f.writeOnly) continue
+      const isPk = !!pk && (name === pk.name || f.source === pk.name)
       out[name] = {
-        type: serializerFieldType(b, f, {
-          enumName: `${mutationName(this)}${capitalize(name)}`,
-          convertChoices: meta.convertChoicesToEnum,
-        }),
+        type: isPk
+          ? GraphQLID
+          : serializerFieldType(b, f, {
+              enumName: `${mutationName(this)}${capitalize(name)}`,
+              convertChoices: meta.convertChoicesToEnum,
+            }),
         description: f.helpText || undefined,
       }
     }
     return {
       ...out,
-      ...super.extraPayloadFields(b),
       errors: {
         type: new GraphQLList(new GraphQLNonNull(b.errorType())),
         description: 'Validation errors (empty on success).',
       },
+      ...super.extraPayloadFields(b),
     }
   }
 
