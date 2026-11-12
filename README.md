@@ -29,7 +29,7 @@ npm install @ghuri/graphql graphql
 
 ```ts
 // src/blog/schema.ts
-import { Field, ModelType, Node, String } from '@ghuri/graphql'
+import { Field, ModelType, Node, String as GString } from '@ghuri/graphql'
 import type { QuerySet } from '@ghuri/orm'
 import { Post, Tag } from './models'
 
@@ -47,7 +47,7 @@ export class PostType extends ModelType {
   }
   // extra fields
   static fields = {
-    excerpt: Field(String, { resolve: (post: Post) => post.body.slice(0, 100) }),
+    excerpt: Field(GString, { resolve: (post: Post) => post.body.slice(0, 100) }),
   }
   // or resolvers for any field: resolveX(parent, args, info)
   static resolveTitle(post: Post) {
@@ -88,17 +88,17 @@ skipped (an error if you list them in `fields`).
 Plain types work like graphene's:
 
 ```ts
-import { Argument, Enum, Field, InputObjectType, Int, Interface, List, NonNull, ObjectType, String, Union } from '@ghuri/graphql'
+import { Argument, Enum, Field, InputObjectType, Int, Interface, List, NonNull, ObjectType, String as GString, Union } from '@ghuri/graphql'
 
-class Named extends Interface { static fields = { name: NonNull(String) } }
+class Named extends Interface { static fields = { name: NonNull(GString) } }
 class Person extends ObjectType {
   static Meta = { interfaces: [Named] }
-  static fields = () => ({ name: NonNull(String), friends: List(Person) })  // thunk for self references
+  static fields = () => ({ name: NonNull(GString), friends: List(Person) })  // thunk for self references
 }
 class Episode extends Enum { static values = { NEWHOPE: 4, EMPIRE: 5, JEDI: 6 } }
 const Color = Enum.from('Color', { RED: 'r', GREEN: 'g' })                 // or from a TS enum
 class SearchResult extends Union { static Meta = { types: [PostType, Person] } }
-class PostFilterInput extends InputObjectType { static fields = { title: String, limit: Argument(Int, { defaultValue: 10 }) } }
+class PostFilterInput extends InputObjectType { static fields = { title: GString, limit: Argument(Int, { defaultValue: 10 }) } }
 ```
 
 Type references can be classes, graphql-js types, the exported scalars (`String`, `Int`, `Float`, `Boolean`, `ID`,
