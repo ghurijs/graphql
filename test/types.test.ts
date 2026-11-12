@@ -1,4 +1,4 @@
-import { CASCADE, CharField, DecimalField, ForeignKey, Model } from '@ghuri/orm'
+import { CASCADE, CharField, DecimalField, ForeignKey, Model, registerModels } from '@ghuri/orm'
 import { GraphQLInt, GraphQLString } from 'graphql'
 import { describe, expect, it } from 'vitest'
 import {
@@ -179,13 +179,12 @@ describe('ModelType generation', () => {
     class Bad extends ModelType {
       static override Meta = { model: Comment, name: 'Bad', fields: ['id', 'nope'] }
     }
-    expect(
-      () =>
-        new Schema({
-          query: class extends Query {
-            static override fields = { b: List(Bad) }
-          },
-        }),
+    expect(() =>
+      new Schema({
+        query: class extends Query {
+          static override fields = { b: List(Bad) }
+        },
+      }).validate(),
     ).toThrow(/"nope" is not a field/)
   })
 
@@ -201,7 +200,7 @@ describe('ModelType generation', () => {
     class Q extends Query {
       static override fields = { a: Field(A), b: Field(B) }
     }
-    expect(() => new Schema({ query: Q })).toThrow(GraphQLConfigurationError)
+    expect(() => new Schema({ query: Q }).validate()).toThrow(GraphQLConfigurationError)
   })
 
   it('supports custom field converters', () => {
@@ -357,7 +356,7 @@ describe('object types, interfaces, unions, enums and inputs', () => {
     class C extends Query {
       static override fields = { a: String }
     }
-    expect(() => new Schema({ query: [A, C] })).toThrow(/defined by both A and C/)
+    expect(() => new Schema({ query: [A, C] }).validate()).toThrow(/defined by both A and C/)
   })
 
   it('exposes Node + connections in SDL', () => {
@@ -389,5 +388,23 @@ describe('object types, interfaces, unions, enums and inputs', () => {
     expect(typeBlock(sdl, 'TagNodeFilter')).toMatch(
       /name: TagNodeNameFilter[\s\S]*and: \[TagNodeFilter!\][\s\S]*or: \[TagNodeFilter!\][\s\S]*not: TagNodeFilter/,
     )
+  })
+})
+
+describe('lazy schema build', () => {
+  it('builds on first use, so src/schema.ts can be imported before INSTALLED_APPS are populated', () => {
+    class Late extends Model({ name: new CharField({ maxLength: 20 }) }) {}
+    class LateType extends ModelType {
+      static override Meta = { model: Late, name: 'LateType' }
+    }
+    // no app label yet: constructing the schema must not touch the model's _meta
+    const s = new Schema({
+      query: class extends Query {
+        static override fields = { lates: List(LateType) }
+      },
+    })
+    registerModels('late', [Late])
+    expect(typeBlock(s.printSchema(), 'LateType')).toContain('name: String!')
+    expect(s.validate()).toBe(s)
   })
 })

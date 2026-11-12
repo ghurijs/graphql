@@ -125,6 +125,10 @@ export class BlogQuery extends Query {
 export const schema = new Schema({ query: [BlogQuery, ShopQuery], mutation: [BlogMutation] })
 ```
 
+The schema is built on first use, so `src/schema.ts` can be imported from your settings (`GRAPHQL.SCHEMA`)
+before the apps are loaded; `schema.validate()` builds it eagerly (configuration errors throw). Model types that
+are only reachable through relations (e.g. `CommentType` via `post.comments`) go in `types: [...]`.
+
 Resolvers receive `(parent, args, info)`; `info.context` is `{ c, user, auth, loaders, request, state }` (`c` is
 the Hono context). Argument types are inferred from `args`. `schema.execute(query, { user, variables })` runs an
 operation without HTTP, `schema.printSchema()` returns the SDL.

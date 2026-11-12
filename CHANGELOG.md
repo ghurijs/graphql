@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `Schema` builds the graphql-js schema on first use (`graphqlSchema`, `execute()`, `printSchema()`, the view) instead of in the constructor, so a project's `src/schema.ts` can be imported by the settings module (`GRAPHQL.SCHEMA`) before `INSTALLED_APPS` assign app labels. `schema.validate()` builds it eagerly and throws configuration errors.
+
 ## 0.1.0-alpha.0
 
 - Initial alpha (ARCHITECTURE.md §15).

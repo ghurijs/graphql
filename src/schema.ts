@@ -55,15 +55,39 @@ function arr<T>(v: T | T[] | undefined): T[] {
  * ```
  */
 export class Schema {
-  readonly graphqlSchema: GraphQLSchema
-  readonly builder: TypeBuilder
+  private built?: { graphqlSchema: GraphQLSchema; builder: TypeBuilder }
 
+  /**
+   * The schema is built on first use (`graphqlSchema`, `execute()`, the view), not in the constructor: model
+   * types need the app registry (app labels, relation targets), and `src/schema.ts` is usually imported by
+   * the settings module before `INSTALLED_APPS` are populated. Call `validate()` to build it eagerly.
+   */
   constructor(readonly options: SchemaOptions) {
+    if (!arr(options.query).length)
+      throw new GraphQLConfigurationError('Schema needs at least one query class.')
+  }
+
+  /** The graphql-js schema (built and validated on first access). */
+  get graphqlSchema(): GraphQLSchema {
+    return this.build().graphqlSchema
+  }
+
+  get builder(): TypeBuilder {
+    return this.build().builder
+  }
+
+  /** Build the schema now and throw configuration errors (e.g. in a test or a deploy check). */
+  validate(): this {
+    this.build()
+    return this
+  }
+
+  private build(): { graphqlSchema: GraphQLSchema; builder: TypeBuilder } {
+    if (this.built) return this.built
+    const options = this.options
     const b = new TypeBuilder({ optimize: options.optimize })
-    this.builder = b
     const queries = arr(options.query)
     const mutations = arr(options.mutation)
-    if (!queries.length) throw new GraphQLConfigurationError('Schema needs at least one query class.')
     for (const cls of [...queries, ...mutations])
       for (const ref of Object.values(declaredFields(cls))) b.discover(ref)
     for (const t of options.types ?? []) b.discover(t)
@@ -78,8 +102,10 @@ export class Schema {
       if (!['object', 'interface', 'union', 'enum', 'input'].includes(kind)) continue
       types.push(b.classType(cls))
     }
-    this.graphqlSchema = new GraphQLSchema({ query, mutation, types, description: options.description })
-    assertValidSchema(this.graphqlSchema)
+    const graphqlSchema = new GraphQLSchema({ query, mutation, types, description: options.description })
+    assertValidSchema(graphqlSchema)
+    this.built = { graphqlSchema, builder: b }
+    return this.built
   }
 
   /**
