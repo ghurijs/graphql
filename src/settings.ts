@@ -22,6 +22,16 @@ export interface GraphQLSettings {
   BATCH?: boolean
   /** Default authentication classes of `GraphQLView` (default: the core request user). */
   AUTHENTICATION_CLASSES?: Array<new () => { authenticate(c: Context): Promise<[any, unknown] | null> }>
+  /**
+   * Default throttle classes of `GraphQLView` (default: none). `@ghuri/rest` throttles; their rates come from
+   * `REST_FRAMEWORK.DEFAULT_THROTTLE_RATES`. `REST_FRAMEWORK.DEFAULT_THROTTLE_CLASSES` does not apply here.
+   */
+  DEFAULT_THROTTLE_CLASSES?: Array<
+    new () => {
+      allowRequest(request: any, view: any): boolean | Promise<boolean>
+      wait?(): number | null
+    }
+  >
   /** Apply the query optimizer (`selectRelated` / `prefetchRelated`) to root QuerySets (default false). */
   OPTIMIZE?: boolean
 }

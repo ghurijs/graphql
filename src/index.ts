@@ -152,9 +152,13 @@ export {
   GRAPHQL_RESPONSE_MEDIA_TYPE,
   type GraphQLAuthenticationClass,
   type GraphQLParams,
+  type GraphQLThrottle,
+  type GraphQLThrottleClass,
   GraphQLView,
   JSON_MEDIA_TYPE,
   negotiateMediaType,
   type PersistedQueryHook,
   type PersistedQueryLookup,
+  THROTTLED_MESSAGE,
+  throttledMessage,
 } from './view'
