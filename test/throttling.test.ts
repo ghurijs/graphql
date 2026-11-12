@@ -71,7 +71,12 @@ describe('GraphQLView throttling', () => {
   const h = useHttp(() => ({
     settings: {
       CACHES: { default: memoryCache() },
-      REST_FRAMEWORK: { DEFAULT_THROTTLE_RATES: RATES, DEFAULT_THROTTLE_CLASSES: [AnonRateThrottle] },
+      // X-Forwarded-For is only read behind a known number of proxies (@ghuri/rest > 0.1.0-alpha.1)
+      REST_FRAMEWORK: {
+        DEFAULT_THROTTLE_RATES: RATES,
+        DEFAULT_THROTTLE_CLASSES: [AnonRateThrottle],
+        NUM_PROXIES: 1,
+      },
       GRAPHQL: { DEFAULT_THROTTLE_CLASSES: [AnonRateThrottle] },
     },
     urls: [
