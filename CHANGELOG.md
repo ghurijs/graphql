@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- **File uploads**: the `Upload` scalar and the
+  [GraphQL multipart request spec](https://github.com/jaydenseric/graphql-multipart-request-spec) in `GraphQLView`.
+  Arguments and input fields typed `Upload` receive a web `File`, over HTTP (`multipart/form-data` with
+  `operations`, `map` and file parts; single and batched operations, files in lists and input objects) and
+  in-process (`schema.execute(source, { variables: { file } })` with `File` / `Blob` values). The SDL prints
+  `scalar Upload`.
+- Multipart is accepted when the schema uses `Upload` (`uploads` / `GRAPHQL.UPLOADS` to force it on or off), with
+  `maxFileSize` (10 MiB), `maxUploadSize` (25 MiB, checked against `Content-Length` before reading and while
+  streaming) and `maxFiles` (10) → 413, and malformed requests → 400. Settings: `UPLOAD_MAX_FILE_SIZE`,
+  `UPLOAD_MAX_SIZE`, `UPLOAD_MAX_FILES`.
+- CSRF: multipart requests go through the view's usual authentication and CSRF checks (session requests need the
+  token, also accepted as a `csrfmiddlewaretoken` part); anonymous multipart requests must also send a
+  preflight-forcing header (`GraphQL-Require-Preflight`, `Apollo-Require-Preflight`, `X-Apollo-Operation-Name`, the
+  CSRF header or `Authorization`), else 400 `CSRF_PREVENTION` (`uploadCsrfPrevention` /
+  `GRAPHQL.UPLOAD_CSRF_PREVENTION` to turn off).
+- `uploadFormData()` builds a multipart body from variables holding files; `graphqlQuery()` in
+  `@ghuri/graphql/testing` sends multipart when a variable holds a `File` / `Blob`.
+
 ## 0.1.0-alpha.2
 
 - **Security fix: relation types are resolved per schema.** With several `Schema`s in one process, a generated

@@ -142,6 +142,19 @@ export {
   typeQueryset,
 } from './types/modeltype'
 export {
+  DEFAULT_UPLOAD_MAX_FILE_SIZE,
+  DEFAULT_UPLOAD_MAX_FILES,
+  DEFAULT_UPLOAD_MAX_SIZE,
+  hasUploads,
+  isBlob,
+  processMultipartForm,
+  readMultipartBody,
+  Upload,
+  UploadError,
+  type UploadLimits,
+  uploadFormData,
+} from './upload'
+export {
   type ComplexityOptions,
   complexityLimit,
   depthLimit,
@@ -161,4 +174,5 @@ export {
   type PersistedQueryLookup,
   THROTTLED_MESSAGE,
   throttledMessage,
+  UPLOAD_PREFLIGHT_HEADERS,
 } from './view'

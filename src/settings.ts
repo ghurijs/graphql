@@ -34,6 +34,16 @@ export interface GraphQLSettings {
   >
   /** Apply the query optimizer (`selectRelated` / `prefetchRelated`) to root QuerySets (default false). */
   OPTIMIZE?: boolean
+  /** Accept multipart file uploads in `GraphQLView` (default: when the schema has an `Upload` scalar). */
+  UPLOADS?: boolean
+  /** Largest uploaded file in bytes (default 10 MiB). */
+  UPLOAD_MAX_FILE_SIZE?: number
+  /** Largest multipart request body in bytes, files included (default 25 MiB). */
+  UPLOAD_MAX_SIZE?: number
+  /** Most files in one multipart request (default 10). */
+  UPLOAD_MAX_FILES?: number
+  /** Require a preflight-forcing header on anonymous multipart requests (default true). */
+  UPLOAD_CSRF_PREVENTION?: boolean
 }
 
 declare module '@ghuri/core' {

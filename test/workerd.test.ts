@@ -112,4 +112,32 @@ describe.each(targets)('Worker bundle from %s on workerd', (target) => {
     const ide = await mf.dispatchFetch(base, { headers: { accept: 'text/html' } })
     expect(await ide.text()).toContain('graphiql')
   })
+
+  it('accepts multipart uploads and enforces the size limit', async () => {
+    const send = async (text: string) => {
+      const body = new FormData()
+      body.append(
+        'operations',
+        JSON.stringify({ query: 'mutation ($f: Upload!) { upload(file: $f) }', variables: { f: null } }),
+      )
+      body.append('map', JSON.stringify({ 0: ['variables.f'] }))
+      body.append('0', new File([text], 'edge.txt', { type: 'text/plain' }))
+      // encode here: Miniflare's own fetch does not serialize Node's FormData
+      const encoded = new Request(base, { method: 'POST', body })
+      return mf.dispatchFetch(base, {
+        method: 'POST',
+        headers: {
+          accept: 'application/graphql-response+json',
+          'content-type': encoded.headers.get('content-type')!,
+          'GraphQL-Require-Preflight': '1',
+        },
+        body: new Uint8Array(await encoded.arrayBuffer()),
+      })
+    }
+    const ok = await send('hello workerd')
+    expect(ok.status).toBe(200)
+    expect(await ok.json()).toEqual({ data: { upload: 'edge.txt:13:hello workerd' } })
+    const big = await send('x'.repeat(5000))
+    expect(big.status).toBe(413)
+  })
 })

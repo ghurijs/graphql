@@ -16,6 +16,7 @@ import {
   type FormattedExecutionResult,
   GraphQLError,
   type GraphQLFormattedError,
+  GraphQLScalarType,
   type GraphQLSchema,
   getOperationAST,
   NoSchemaIntrospectionCustomRule,
@@ -31,6 +32,14 @@ import { renderGraphiQL } from './graphiql'
 import { PermissionRequest } from './permissions'
 import { toGraphQLSchema } from './schema'
 import { type GraphQLSettings, graphqlSettings, type SchemaLike } from './settings'
+import {
+  DEFAULT_UPLOAD_MAX_FILE_SIZE,
+  DEFAULT_UPLOAD_MAX_FILES,
+  DEFAULT_UPLOAD_MAX_SIZE,
+  processMultipartForm,
+  readMultipartBody,
+  UploadError,
+} from './upload'
 import type { MaybePromise } from './utils'
 import { complexityLimit, depthLimit } from './validation'
 
@@ -65,6 +74,17 @@ export function throttledMessage(wait: number | null, detail: string = THROTTLED
   if (wait === null) return detail
   return `${detail} Expected available in ${wait} second${wait === 1 ? '' : 's'}.`
 }
+
+/**
+ * Headers that make a multipart request "non-simple", so a browser sends a CORS preflight before it and a
+ * cross-site page cannot forge it (the CSRF header name from settings is accepted too).
+ */
+export const UPLOAD_PREFLIGHT_HEADERS: readonly string[] = [
+  'GraphQL-Require-Preflight',
+  'Apollo-Require-Preflight',
+  'X-Apollo-Operation-Name',
+  'Authorization',
+]
 
 /** The parameters of one GraphQL request. */
 export interface GraphQLParams {
@@ -181,6 +201,9 @@ interface OneResult {
  *   once) after authentication and before execution; throttled requests get 429 + `Retry-After` and
  *   `extensions.code: "THROTTLED"`. The GraphiQL page itself is never throttled.
  * - `maxDepth`, `maxComplexity`, `introspection`, `batch` (default from `GRAPHQL` settings).
+ * - File uploads (`multipart/form-data`, the GraphQL multipart request spec) when the schema uses the `Upload`
+ *   scalar: `maxFileSize`, `maxUploadSize`, `maxFiles`; anonymous multipart requests need a preflight header
+ *   (`uploadCsrfPrevention`).
  * - Unexpected errors are masked as "Internal server error" unless `DEBUG`.
  */
 export class GraphQLView extends View {
@@ -216,6 +239,26 @@ export class GraphQLView extends View {
   getContext?: (c: Context, context: GraphQLContext) => MaybePromise<Record<string, unknown> | undefined>
   /** Show error stacks (default `DEBUG`). */
   debug?: boolean
+  /**
+   * Accept `multipart/form-data` uploads (default `GRAPHQL.UPLOADS`, else: when the schema has an `Upload`
+   * scalar). When off, multipart requests get 415.
+   */
+  uploads?: boolean
+  /** Largest uploaded file in bytes (default `GRAPHQL.UPLOAD_MAX_FILE_SIZE`, else 10 MiB). Larger → 413. */
+  maxFileSize?: number
+  /**
+   * Largest multipart body in bytes, files included (default `GRAPHQL.UPLOAD_MAX_SIZE`, else 25 MiB). Checked
+   * against `Content-Length` before reading and while reading. Larger → 413.
+   */
+  maxUploadSize?: number
+  /** Most file parts in one request (default `GRAPHQL.UPLOAD_MAX_FILES`, else 10). More → 413. */
+  maxFiles?: number
+  /**
+   * Refuse (400) multipart requests from anonymous users unless they carry a header a cross-site form cannot
+   * send (`UPLOAD_PREFLIGHT_HEADERS` or the CSRF header). Authenticated requests already passed the CSRF check
+   * (session) or authenticate with a header (token / JWT). Default `GRAPHQL.UPLOAD_CSRF_PREVENTION`, else true.
+   */
+  uploadCsrfPrevention?: boolean
 
   override async get(c: Context): Promise<Response> {
     return this.handle(c)
@@ -280,9 +323,10 @@ export class GraphQLView extends View {
         JSON_MEDIA_TYPE,
       )
     }
+    const multipart = method === 'POST' && isMultipart(c) && this.uploadsEnabled(schema, settings)
     let params: GraphQLParams | GraphQLParams[]
     try {
-      params = await this.parseRequest(c, method, url)
+      params = multipart ? await this.parseMultipart(c, settings) : await this.parseRequest(c, method, url)
     } catch (err) {
       if (err instanceof HttpProblem) return this.problem(c, err, mediaType)
       throw err
@@ -301,6 +345,19 @@ export class GraphQLView extends View {
       const p = this.authProblem(err)
       if (p) return this.problem(c, p, mediaType)
       throw err
+    }
+    if (multipart && !auth.user.isAuthenticated && !this.uploadPreflightOk(c, settings)) {
+      const headers = [...UPLOAD_PREFLIGHT_HEADERS.slice(0, 3), csrfHeaderName(c)].join(', ')
+      return this.problem(
+        c,
+        new HttpProblem(
+          400,
+          `This multipart request has been blocked as a potential Cross-Site Request Forgery (CSRF). Send a non-empty ${headers} or Authorization header.`,
+          {},
+          'CSRF_PREVENTION',
+        ),
+        mediaType,
+      )
     }
     try {
       await this.checkThrottles(
@@ -383,6 +440,53 @@ export class GraphQLView extends View {
     }
     if (!body || typeof body !== 'object') throw new HttpProblem(400, 'POST body must be a JSON object.')
     return body as GraphQLParams
+  }
+
+  // ---- uploads (GraphQL multipart request spec) ------------------------------------------------------------
+
+  /** Are multipart uploads accepted? `uploads`, then `GRAPHQL.UPLOADS`, else whether the schema has `Upload`. */
+  uploadsEnabled(schema: GraphQLSchema, settings: GraphQLSettings): boolean {
+    return this.uploads ?? settings.UPLOADS ?? schema.getType('Upload') instanceof GraphQLScalarType
+  }
+
+  /**
+   * Parse a `multipart/form-data` request (`operations`, `map`, file parts) into GraphQL params with `File`
+   * values in their variables, enforcing `maxUploadSize`, `maxFileSize` and `maxFiles`.
+   */
+  protected async parseMultipart(
+    c: Context,
+    settings: GraphQLSettings,
+  ): Promise<GraphQLParams | GraphQLParams[]> {
+    const maxUploadSize = this.maxUploadSize ?? settings.UPLOAD_MAX_SIZE ?? DEFAULT_UPLOAD_MAX_SIZE
+    try {
+      const req = c.req as unknown as { bodyCache: Record<string, Promise<unknown> | undefined> }
+      let form: FormData
+      if (Object.keys(req.bodyCache).length) {
+        // something already read the body (it is cached by Hono): re-check the total size
+        form = await c.req.formData()
+        let total = 0
+        for (const [, v] of form) total += typeof v === 'string' ? v.length : v.size
+        if (total > maxUploadSize)
+          throw new UploadError(413, `Request body too large: at most ${maxUploadSize} bytes.`)
+      } else {
+        form = await readMultipartBody(c.req.raw, maxUploadSize)
+        // later readers (the CSRF check's `csrfmiddlewaretoken` lookup) reuse the parsed form
+        req.bodyCache.formData = Promise.resolve(form)
+      }
+      return processMultipartForm(form, {
+        maxFileSize: this.maxFileSize ?? settings.UPLOAD_MAX_FILE_SIZE ?? DEFAULT_UPLOAD_MAX_FILE_SIZE,
+        maxFiles: this.maxFiles ?? settings.UPLOAD_MAX_FILES ?? DEFAULT_UPLOAD_MAX_FILES,
+      }) as GraphQLParams | GraphQLParams[]
+    } catch (err) {
+      if (err instanceof UploadError) throw new HttpProblem(err.status, err.message)
+      throw err
+    }
+  }
+
+  /** Does the request carry a header that forces a CORS preflight (or is the check off)? */
+  protected uploadPreflightOk(c: Context, settings: GraphQLSettings): boolean {
+    if (!(this.uploadCsrfPrevention ?? settings.UPLOAD_CSRF_PREVENTION ?? true)) return true
+    return [...UPLOAD_PREFLIGHT_HEADERS, csrfHeaderName(c)].some((h) => !!c.req.header(h)?.trim())
   }
 
   // ---- authentication -----------------------------------------------------------------------------------
@@ -583,10 +687,7 @@ export class GraphQLView extends View {
   protected renderGraphiQL(c: Context): Response {
     const token = getCsrfToken(c)
     setCsrfCookieIfNeeded(c)
-    const html = renderGraphiQL({
-      csrfToken: token,
-      csrfHeaderName: (graphqlSettingsCsrfHeader(c) as string) ?? 'X-CSRFToken',
-    })
+    const html = renderGraphiQL({ csrfToken: token, csrfHeaderName: csrfHeaderName(c) })
     return c.html(html, 200, { 'Cache-Control': 'no-store' })
   }
 }
@@ -598,6 +699,14 @@ function graphqlSettingsCsrfHeader(c: Context): string | undefined {
   } catch {
     return undefined
   }
+}
+
+function csrfHeaderName(c: Context): string {
+  return graphqlSettingsCsrfHeader(c) ?? 'X-CSRFToken'
+}
+
+function isMultipart(c: Context): boolean {
+  return (c.req.header('content-type') ?? '').split(';')[0].trim().toLowerCase() === 'multipart/form-data'
 }
 
 function throttleHttpProblem(wait: number | null, message?: string): HttpProblem {

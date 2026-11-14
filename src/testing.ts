@@ -1,11 +1,12 @@
 // @ghuri/graphql/testing — run GraphQL operations through the test client (graphene-django's GraphQLTestCase).
 import type { FormattedExecutionResult, GraphQLFormattedError } from 'graphql'
+import { hasUploads, uploadFormData } from './upload'
 
 /** Anything with the core test client's `post()` / `get()`. */
 export interface TestClientLike {
   post(
     path: string,
-    opts?: { json?: unknown; headers?: Record<string, string>; csrf?: boolean; body?: any },
+    opts?: { json?: unknown; headers?: Record<string, string>; csrf?: boolean; body?: any; form?: any },
   ): Promise<Response>
   get(
     path: string,
@@ -48,6 +49,9 @@ export const graphqlTestDefaults = { path: '/graphql/' }
  * assertResponseNoErrors(res)
  * expect(res.data.me.username).toBe('ann')
  * ```
+ *
+ * Variables holding a `File` / `Blob` are sent as a GraphQL multipart request (with a
+ * `GraphQL-Require-Preflight` header, so anonymous uploads pass the view's CSRF prevention).
  */
 export async function graphqlQuery<TData = any>(
   client: TestClientLike,
@@ -66,11 +70,16 @@ export async function graphqlQuery<TData = any>(
     const json: Record<string, unknown> = { query }
     if (opts.variables) json.variables = opts.variables
     if (opts.operationName) json.operationName = opts.operationName
-    response = await client.post(path, {
-      json,
-      headers,
-      ...(opts.csrf === undefined ? {} : { csrf: opts.csrf }),
-    })
+    const csrf = opts.csrf === undefined ? {} : { csrf: opts.csrf }
+    if (hasUploads(opts.variables)) {
+      response = await client.post(path, {
+        form: uploadFormData(json),
+        headers: { 'GraphQL-Require-Preflight': '1', ...headers },
+        ...csrf,
+      })
+    } else {
+      response = await client.post(path, { json, headers, ...csrf })
+    }
   }
   const text = await response.text()
   let json: any
