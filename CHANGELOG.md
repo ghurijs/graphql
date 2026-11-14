@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-alpha.3
 
 - **File uploads**: the `Upload` scalar and the
   [GraphQL multipart request spec](https://github.com/jaydenseric/graphql-multipart-request-spec) in `GraphQLView`.
