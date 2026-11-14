@@ -291,6 +291,60 @@ class IntroduceShip extends ClientIDMutation {                 // Relay: input +
 }
 ```
 
+### File uploads
+
+Type an argument or input field `Upload` and the resolver receives a web `File` (`name`, `type`, `size`,
+`arrayBuffer()`, `stream()`), sent by clients as a
+[GraphQL multipart request](https://github.com/jaydenseric/graphql-multipart-request-spec) (apollo-upload-client,
+urql, graphql-request, …):
+
+```ts
+import { Field, ID, Mutation, NonNull, Upload } from '@ghuri/graphql'
+import { upload } from '@ghuri/storage'
+
+class SetCover extends Mutation {
+  static Arguments = { id: NonNull(ID), cover: NonNull(Upload) }     // `scalar Upload` in the SDL
+  static fields = { post: Field(PostType) }
+  static mutate = loginRequired(async (_root, { id, cover }, info) => {   // cover: File
+    const post = await Post.objects.get({ id })
+    post.cover = upload(cover)                                         // ImageField / FileField
+    await post.save()
+    return { post }
+  })
+}
+```
+
+```sh
+curl https://example.com/graphql/ \
+  -H 'Authorization: Bearer <jwt>' \
+  -F operations='{ "query": "mutation ($id: ID!, $f: Upload!) { setCover(id: $id, cover: $f) { post { id } } }", "variables": { "id": "1", "f": null } }' \
+  -F map='{ "0": ["variables.f"] }' \
+  -F 0=@cover.png
+```
+
+- `GraphQLView` accepts `POST multipart/form-data` with `operations`, `map` and the file parts as soon as the schema
+  uses `Upload` (`uploads: false` / `GRAPHQL.UPLOADS` to turn it off; then multipart is 415 as before). `Upload`
+  works in lists (`List(Upload)`), input objects and batches (`0.variables.file` paths, with `batch: true`).
+- Malformed requests are **400**: missing / invalid `operations` or `map`, a map path that is not an existing
+  `null` inside an operation's `variables`, or a map entry without its file part.
+- Limits, per view or in `GRAPHQL` settings: `maxFileSize` (`UPLOAD_MAX_FILE_SIZE`, default 10 MiB per file),
+  `maxUploadSize` (`UPLOAD_MAX_SIZE`, default 25 MiB for the whole body) and `maxFiles` (`UPLOAD_MAX_FILES`,
+  default 10) → **413**. A larger `Content-Length` is refused before the body is read; a body without one is cut
+  off once it passes `maxUploadSize`. Uploads are buffered in memory (Workers have 128 MB), so keep the limits
+  modest and stream big files to storage with presigned URLs instead.
+- **CSRF.** A multipart `POST` is a "simple" request: browsers send it cross-site without a CORS preflight. So
+  multipart requests go through the same checks as every other request (session-authenticated ones need the CSRF
+  token, as the `X-CSRFToken` header or a `csrfmiddlewaretoken` part; token / JWT ones authenticate with a header
+  a cross-site form cannot set), and **anonymous** multipart requests must also carry a header that forces a
+  preflight: `GraphQL-Require-Preflight`, `Apollo-Require-Preflight`, `X-Apollo-Operation-Name`, the CSRF header
+  or `Authorization` (any non-empty value; Apollo Server's `csrfPrevention` works the same way). Otherwise they
+  get **400** with `extensions.code: "CSRF_PREVENTION"`. `uploadCsrfPrevention: false` turns that last check off.
+- In-process, `schema.execute(source, { variables: { file } })` takes `File` or `Blob` values (a `Blob` becomes a
+  `File` named `blob`). `uploadFormData({ query, variables })` builds the multipart body from such variables (for
+  Node scripts and tests), and `graphqlQuery()` from `@ghuri/graphql/testing` sends one when a variable holds a
+  file.
+- `Upload` is input only: returning it, or a literal in the query (`cover: "x"`), is an error.
+
 ## 6. Authentication and permissions
 
 `info.context.user` is the request user. In the view, `authenticationClasses` are the REST ones:
@@ -304,7 +358,8 @@ path('graphql/', GraphQLView.asView({ schema, authenticationClasses: [SessionAut
   is used.
 - **CSRF**: the view is exempt from `CsrfMiddleware` (so token / JWT clients work); CSRF is enforced for
   session-authenticated `POST`s (`SessionAuthentication`, or the core-user fallback). Invalid credentials give
-  401 (+ `WWW-Authenticate`), CSRF failures 403.
+  401 (+ `WWW-Authenticate`), CSRF failures 403. Anonymous multipart uploads also need a preflight header (see
+  [File uploads](#file-uploads)).
 
 Resolver decorators (also usable as TC39 method decorators):
 
@@ -336,7 +391,8 @@ export const urlpatterns = [path('graphql/', GraphQLView.asView({ schema, graphi
 GraphQL over HTTP (spec-compliant):
 
 - `GET` with `query` / `variables` / `operationName` (queries only: mutations → **405**, `Allow: POST`), `POST`
-  with `application/json`, `application/graphql` or a form.
+  with `application/json`, `application/graphql` or a form, and `multipart/form-data` uploads when the schema
+  uses `Upload` (see [File uploads](#file-uploads)).
 - `Accept: application/graphql-response+json` → that media type; parse / validation / variable errors → **400**;
   executed requests → 200 (errors in `errors`). `application/json` (or no `Accept`) → 200 for every well-formed
   request. Malformed JSON / missing query → 400, other content types → 415, unacceptable `Accept` → 406.
@@ -402,6 +458,11 @@ GRAPHQL: {
   AUTHENTICATION_CLASSES: [SessionAuthentication, TokenAuthentication],
   DEFAULT_THROTTLE_CLASSES: [AnonRateThrottle, UserRateThrottle],   // default: none
   OPTIMIZE: false,
+  UPLOADS: true,                  // default: when the schema uses Upload
+  UPLOAD_MAX_FILE_SIZE: 10 * 1024 * 1024,
+  UPLOAD_MAX_SIZE: 25 * 1024 * 1024,
+  UPLOAD_MAX_FILES: 10,
+  UPLOAD_CSRF_PREVENTION: true,
 }
 ```
 

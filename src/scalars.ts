@@ -8,6 +8,7 @@ import {
   GraphQLScalarType,
   GraphQLString,
 } from 'graphql'
+import { Upload } from './upload'
 import { base64ToBytes, bytesToBase64 } from './utils'
 
 function inspect(v: unknown): string {
@@ -203,4 +204,5 @@ export const scalars = {
   UUID,
   BigInt: BigIntScalar,
   Base64,
+  Upload,
 } as const
